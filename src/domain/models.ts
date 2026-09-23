@@ -43,11 +43,7 @@ export interface CommitPlan {
 }
 
 export type ContributionLevel =
-  | 'NONE'
-  | 'FIRST_QUARTILE'
-  | 'SECOND_QUARTILE'
-  | 'THIRD_QUARTILE'
-  | 'FOURTH_QUARTILE';
+  'NONE' | 'FIRST_QUARTILE' | 'SECOND_QUARTILE' | 'THIRD_QUARTILE' | 'FOURTH_QUARTILE';
 
 export interface ContributionDay {
   date: string;
@@ -77,12 +73,7 @@ export interface ContributionCalendarData {
 }
 
 export type ExecutionStatus =
-  | 'idle'
-  | 'validating'
-  | 'running'
-  | 'completed'
-  | 'partial_failure'
-  | 'aborted';
+  'idle' | 'validating' | 'running' | 'completed' | 'partial_failure' | 'aborted';
 
 export interface CommitResult {
   entryId: string;

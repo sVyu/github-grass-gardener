@@ -14,7 +14,10 @@ interface PrepareInput {
   now?: Date;
 }
 
-export async function prepareCommitPlan(input: PrepareInput, github: GitHubPort): Promise<CommitPlan> {
+export async function prepareCommitPlan(
+  input: PrepareInput,
+  github: GitHubPort,
+): Promise<CommitPlan> {
   if (!input.verifiedEmails.includes(input.author.email)) {
     throw new Error('Choose an email linked to your GitHub account.');
   }
@@ -23,7 +26,13 @@ export async function prepareCommitPlan(input: PrepareInput, github: GitHubPort)
   if (!validation.canPublish) throw new Error(validation.blockers.join(' '));
   const baseHeadSha = await github.getBranchHead(repo);
   return createCommitPlan({
-    id: input.id, repo, author: input.author, baseHeadSha, timezone: input.timezone,
-    dates: input.dates, count: input.count, now: input.now,
+    id: input.id,
+    repo,
+    author: input.author,
+    baseHeadSha,
+    timezone: input.timezone,
+    dates: input.dates,
+    count: input.count,
+    now: input.now,
   });
 }

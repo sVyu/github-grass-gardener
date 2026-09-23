@@ -42,9 +42,15 @@ function startBatch(plan: CommitPlan, now: () => Date): ExecutionBatch {
   };
 }
 
-export async function publishCommitPlan(plan: CommitPlan, github: GitHubPort, options: PublishOptions = {}): Promise<ExecutionBatch> {
+export async function publishCommitPlan(
+  plan: CommitPlan,
+  github: GitHubPort,
+  options: PublishOptions = {},
+): Promise<ExecutionBatch> {
   const now = options.now ?? (() => new Date());
-  const wait = options.wait ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const wait =
+    options.wait ??
+    ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   const active = activeBatches.get(github) ?? new Set<string>();
   if (active.has(plan.id)) throw new Error('This batch is already running.');
   active.add(plan.id);
@@ -54,7 +60,13 @@ export async function publishCommitPlan(plan: CommitPlan, github: GitHubPort, op
   const report = () => options.onProgress?.({ ...batch, results: [...batch.results] });
   const skipRemaining = (entries: CommitEntry[], message: string) => {
     for (const entry of entries) {
-      batch.results.push({ entryId: entry.id, targetDate: entry.targetDate, status: 'skipped', error: message, timestamp: now().toISOString() });
+      batch.results.push({
+        entryId: entry.id,
+        targetDate: entry.targetDate,
+        status: 'skipped',
+        error: message,
+        timestamp: now().toISOString(),
+      });
     }
   };
 
@@ -73,14 +85,22 @@ export async function publishCommitPlan(plan: CommitPlan, github: GitHubPort, op
 
     let content = await github.getActivityContent(plan.targetRepo);
     const existingIds = publishedIds(content, plan.id);
-    const pending = plan.entries.filter((entry) => entry.status === 'planned' || entry.status === 'failed');
+    const pending = plan.entries.filter(
+      (entry) => entry.status === 'planned' || entry.status === 'failed',
+    );
     batch.status = 'running';
     report();
 
     for (let index = 0; index < pending.length; index += 1) {
       const entry = pending[index]!;
       if (existingIds.has(entry.id)) {
-        batch.results.push({ entryId: entry.id, targetDate: entry.targetDate, status: 'skipped', error: 'Already recorded in this batch.', timestamp: now().toISOString() });
+        batch.results.push({
+          entryId: entry.id,
+          targetDate: entry.targetDate,
+          status: 'skipped',
+          error: 'Already recorded in this batch.',
+          timestamp: now().toISOString(),
+        });
         report();
         continue;
       }
@@ -98,9 +118,21 @@ export async function publishCommitPlan(plan: CommitPlan, github: GitHubPort, op
         const nextContent = buildActivityLog(content, plan.id, entry);
         const blob = await github.createBlob(plan.targetRepo, nextContent);
         const tree = await github.createTree(plan.targetRepo, baseTree, blob);
-        proposedSha = await github.createCommit(plan.targetRepo, head, tree, entry.message, entry.authorDateISO, plan.author);
+        proposedSha = await github.createCommit(
+          plan.targetRepo,
+          head,
+          tree,
+          entry.message,
+          entry.authorDateISO,
+          plan.author,
+        );
         try {
-          await github.updateBranchRef(plan.targetRepo.owner, plan.targetRepo.name, plan.targetRepo.defaultBranch, proposedSha);
+          await github.updateBranchRef(
+            plan.targetRepo.owner,
+            plan.targetRepo.name,
+            plan.targetRepo.defaultBranch,
+            proposedSha,
+          );
         } catch (error) {
           // The response can be lost after GitHub advances the ref. Check before reporting failure.
           const observed = await github.getBranchHead(plan.targetRepo);
@@ -110,12 +142,24 @@ export async function publishCommitPlan(plan: CommitPlan, github: GitHubPort, op
         content = nextContent;
         batch.successCount += 1;
         batch.finalHeadSha = head;
-        batch.results.push({ entryId: entry.id, targetDate: entry.targetDate, status: 'success', commitSha: head, timestamp: now().toISOString() });
+        batch.results.push({
+          entryId: entry.id,
+          targetDate: entry.targetDate,
+          status: 'success',
+          commitSha: head,
+          timestamp: now().toISOString(),
+        });
         report();
       } catch (error) {
         batch.failedCount += 1;
         batch.status = 'partial_failure';
-        batch.results.push({ entryId: entry.id, targetDate: entry.targetDate, status: 'failed', error: safeError(error), timestamp: now().toISOString() });
+        batch.results.push({
+          entryId: entry.id,
+          targetDate: entry.targetDate,
+          status: 'failed',
+          error: safeError(error),
+          timestamp: now().toISOString(),
+        });
         skipRemaining(pending.slice(index + 1), 'Stopped after a publication error.');
         report();
         break;
@@ -130,7 +174,13 @@ export async function publishCommitPlan(plan: CommitPlan, github: GitHubPort, op
   } catch (error) {
     batch.status = 'aborted';
     batch.failedCount = 1;
-    batch.results.push({ entryId: '', targetDate: '', status: 'failed', error: safeError(error), timestamp: now().toISOString() });
+    batch.results.push({
+      entryId: '',
+      targetDate: '',
+      status: 'failed',
+      error: safeError(error),
+      timestamp: now().toISOString(),
+    });
     batch.completedAt = now().toISOString();
     report();
     return batch;

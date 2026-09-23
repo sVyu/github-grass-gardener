@@ -1,7 +1,13 @@
 import { graphql } from '@octokit/graphql';
 import { Octokit } from '@octokit/rest';
 import type { GitHubPort, Viewer } from '../../application/ports';
-import type { AuthorInfo, ContributionCalendarData, ContributionDay, ContributionLevel, RepositoryRef } from '../../domain/models';
+import type {
+  AuthorInfo,
+  ContributionCalendarData,
+  ContributionDay,
+  ContributionLevel,
+  RepositoryRef,
+} from '../../domain/models';
 
 const GRAPHQL_CALENDAR = `
   query GetContributionCalendar($username: String!, $from: DateTime!, $to: DateTime!) {
@@ -34,13 +40,21 @@ function retryAfterOf(error: unknown): number | undefined {
 }
 
 export class GitHubApiError extends Error {
-  constructor(public readonly status: number | undefined, public readonly retryAfterMs?: number) {
+  constructor(
+    public readonly status: number | undefined,
+    public readonly retryAfterMs?: number,
+  ) {
     super(
-      status === 401 ? 'GitHub token is invalid or expired.'
-        : status === 403 ? 'GitHub denied access. Check the token permissions or rate limit.'
-          : status === 404 ? 'The GitHub resource was not found or is not accessible.'
-            : status === 409 || status === 422 ? 'GitHub rejected the branch update. Refresh the repository state.'
-              : status === 429 ? 'GitHub rate limit reached. Wait before retrying.'
+      status === 401
+        ? 'GitHub token is invalid or expired.'
+        : status === 403
+          ? 'GitHub denied access. Check the token permissions or rate limit.'
+          : status === 404
+            ? 'The GitHub resource was not found or is not accessible.'
+            : status === 409 || status === 422
+              ? 'GitHub rejected the branch update. Refresh the repository state.'
+              : status === 429
+                ? 'GitHub rate limit reached. Wait before retrying.'
                 : 'GitHub request failed. Try again later.',
     );
     this.name = 'GitHubApiError';
@@ -91,11 +105,18 @@ function mapRepository(value: unknown): RepositoryRef {
   };
 }
 
-const LEVELS: ContributionLevel[] = ['NONE', 'FIRST_QUARTILE', 'SECOND_QUARTILE', 'THIRD_QUARTILE', 'FOURTH_QUARTILE'];
+const LEVELS: ContributionLevel[] = [
+  'NONE',
+  'FIRST_QUARTILE',
+  'SECOND_QUARTILE',
+  'THIRD_QUARTILE',
+  'FOURTH_QUARTILE',
+];
 
 function mapCalendar(value: unknown, year: number): ContributionCalendarData {
   const calendar = record(value);
-  if (!Array.isArray(calendar.weeks) || !Array.isArray(calendar.months)) throw new GitHubApiError(502);
+  if (!Array.isArray(calendar.weeks) || !Array.isArray(calendar.months))
+    throw new GitHubApiError(502);
   return {
     totalContributions: number(calendar.totalContributions),
     year,
@@ -109,8 +130,11 @@ function mapCalendar(value: unknown, year: number): ContributionCalendarData {
           const level = string(day.contributionLevel) as ContributionLevel;
           if (!LEVELS.includes(level)) throw new GitHubApiError(502);
           return {
-            date: string(day.date), weekday: number(day.weekday),
-            contributionCount: number(day.contributionCount), level, color: string(day.color),
+            date: string(day.date),
+            weekday: number(day.weekday),
+            contributionCount: number(day.contributionCount),
+            level,
+            color: string(day.color),
           };
         }),
       };
@@ -118,7 +142,9 @@ function mapCalendar(value: unknown, year: number): ContributionCalendarData {
     months: calendar.months.map((rawMonth) => {
       const month = record(rawMonth);
       return {
-        name: string(month.name), year: number(month.year), firstDay: string(month.firstDay),
+        name: string(month.name),
+        year: number(month.year),
+        firstDay: string(month.firstDay),
         totalWeeks: number(month.totalWeeks),
       };
     }),
@@ -140,14 +166,21 @@ export class GitHubClient implements GitHubPort {
 
   async getViewer(): Promise<Viewer> {
     const { data } = await safe(() => this.rest.rest.users.getAuthenticated());
-    return { login: data.login, id: data.id, name: data.name || data.login, avatarUrl: data.avatar_url };
+    return {
+      login: data.login,
+      id: data.id,
+      name: data.name || data.login,
+      avatarUrl: data.avatar_url,
+    };
   }
 
   async getVerifiedEmails(viewer: Viewer): Promise<string[]> {
     const noreply = `${viewer.id}+${viewer.login}@users.noreply.github.com`;
     try {
       const { data } = await safe(() => this.rest.rest.users.listEmailsForAuthenticatedUser());
-      return [...new Set([noreply, ...data.filter((item) => item.verified).map((item) => item.email)])];
+      return [
+        ...new Set([noreply, ...data.filter((item) => item.verified).map((item) => item.email)]),
+      ];
     } catch (error) {
       if (error instanceof GitHubApiError && error.status === 403) return [noreply];
       throw error;
@@ -155,45 +188,89 @@ export class GitHubClient implements GitHubPort {
   }
 
   async listRepositories(): Promise<RepositoryRef[]> {
-    const data = await safe(() => this.rest.paginate(this.rest.rest.repos.listForAuthenticatedUser, { per_page: 100, sort: 'updated' }));
+    const data = await safe(() =>
+      this.rest.paginate(this.rest.rest.repos.listForAuthenticatedUser, {
+        per_page: 100,
+        sort: 'updated',
+      }),
+    );
     return data.map(mapRepository);
   }
 
   async createRepository(name: string, isPrivate: boolean): Promise<RepositoryRef> {
-    const { data } = await safe(() => this.rest.rest.repos.createForAuthenticatedUser({
-      name, private: isPrivate, auto_init: true, description: 'Commit activity managed by GitHub Grass Gardener',
-    }));
+    const { data } = await safe(() =>
+      this.rest.rest.repos.createForAuthenticatedUser({
+        name,
+        private: isPrivate,
+        auto_init: true,
+        description: 'Commit activity managed by GitHub Grass Gardener',
+      }),
+    );
     return mapRepository({ ...data, permissions: { push: true } });
   }
 
   async getContributionCalendar(username: string, year: number): Promise<ContributionCalendarData> {
     if (!Number.isInteger(year) || year < 1970 || year > 2099) throw new Error('Invalid year');
-    const data = await safe(() => this.query<{ user: { contributionsCollection: { contributionCalendar: unknown } } | null }>(GRAPHQL_CALENDAR, {
-      username, from: `${year}-01-01T00:00:00Z`, to: `${year}-12-31T23:59:59Z`,
-    }));
+    const data = await safe(() =>
+      this.query<{ user: { contributionsCollection: { contributionCalendar: unknown } } | null }>(
+        GRAPHQL_CALENDAR,
+        {
+          username,
+          from: `${year}-01-01T00:00:00Z`,
+          to: `${year}-12-31T23:59:59Z`,
+        },
+      ),
+    );
     if (!data.user) throw new GitHubApiError(404);
     return mapCalendar(data.user.contributionsCollection.contributionCalendar, year);
   }
 
   async getBranchHead(repo: RepositoryRef): Promise<string> {
-    const { data } = await safe(() => this.rest.rest.git.getRef({ owner: repo.owner, repo: repo.name, ref: `heads/${repo.defaultBranch}` }));
+    const { data } = await safe(() =>
+      this.rest.rest.git.getRef({
+        owner: repo.owner,
+        repo: repo.name,
+        ref: `heads/${repo.defaultBranch}`,
+      }),
+    );
     return data.object.sha;
   }
 
   async isBranchProtected(repo: RepositoryRef): Promise<boolean> {
-    const { data } = await safe(() => this.rest.rest.repos.getBranch({ owner: repo.owner, repo: repo.name, branch: repo.defaultBranch }));
+    const { data } = await safe(() =>
+      this.rest.rest.repos.getBranch({
+        owner: repo.owner,
+        repo: repo.name,
+        branch: repo.defaultBranch,
+      }),
+    );
     return data.protected;
   }
 
   async getCommitTree(repo: RepositoryRef, sha: string): Promise<string> {
-    const { data } = await safe(() => this.rest.rest.git.getCommit({ owner: repo.owner, repo: repo.name, commit_sha: sha }));
+    const { data } = await safe(() =>
+      this.rest.rest.git.getCommit({ owner: repo.owner, repo: repo.name, commit_sha: sha }),
+    );
     return data.tree.sha;
   }
 
   async getActivityContent(repo: RepositoryRef): Promise<string> {
     try {
-      const { data } = await safe(() => this.rest.rest.repos.getContent({ owner: repo.owner, repo: repo.name, path: '.grass-gardener/activity.jsonl', ref: repo.defaultBranch }));
-      if (Array.isArray(data) || data.type !== 'file' || data.encoding !== 'base64' || !data.content) throw new GitHubApiError(502);
+      const { data } = await safe(() =>
+        this.rest.rest.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: '.grass-gardener/activity.jsonl',
+          ref: repo.defaultBranch,
+        }),
+      );
+      if (
+        Array.isArray(data) ||
+        data.type !== 'file' ||
+        data.encoding !== 'base64' ||
+        !data.content
+      )
+        throw new GitHubApiError(502);
       const binary = atob(data.content.replace(/\s/g, ''));
       return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
     } catch (error) {
@@ -203,28 +280,63 @@ export class GitHubClient implements GitHubPort {
   }
 
   async createBlob(repo: RepositoryRef, content: string): Promise<string> {
-    const { data } = await safe(() => this.rest.rest.git.createBlob({ owner: repo.owner, repo: repo.name, content, encoding: 'utf-8' }));
+    const { data } = await safe(() =>
+      this.rest.rest.git.createBlob({
+        owner: repo.owner,
+        repo: repo.name,
+        content,
+        encoding: 'utf-8',
+      }),
+    );
     return data.sha;
   }
 
   async createTree(repo: RepositoryRef, baseTreeSha: string, blobSha: string): Promise<string> {
-    const { data } = await safe(() => this.rest.rest.git.createTree({
-      owner: repo.owner, repo: repo.name, base_tree: baseTreeSha,
-      tree: [{ path: '.grass-gardener/activity.jsonl', mode: '100644', type: 'blob', sha: blobSha }],
-    }));
+    const { data } = await safe(() =>
+      this.rest.rest.git.createTree({
+        owner: repo.owner,
+        repo: repo.name,
+        base_tree: baseTreeSha,
+        tree: [
+          { path: '.grass-gardener/activity.jsonl', mode: '100644', type: 'blob', sha: blobSha },
+        ],
+      }),
+    );
     return data.sha;
   }
 
-  async createCommit(repo: RepositoryRef, parentSha: string, treeSha: string, message: string, date: string, author: AuthorInfo): Promise<string> {
+  async createCommit(
+    repo: RepositoryRef,
+    parentSha: string,
+    treeSha: string,
+    message: string,
+    date: string,
+    author: AuthorInfo,
+  ): Promise<string> {
     const identity = { name: author.name, email: author.email, date };
-    const { data } = await safe(() => this.rest.rest.git.createCommit({
-      owner: repo.owner, repo: repo.name, message, tree: treeSha, parents: [parentSha],
-      author: identity, committer: identity,
-    }));
+    const { data } = await safe(() =>
+      this.rest.rest.git.createCommit({
+        owner: repo.owner,
+        repo: repo.name,
+        message,
+        tree: treeSha,
+        parents: [parentSha],
+        author: identity,
+        committer: identity,
+      }),
+    );
     return data.sha;
   }
 
   async updateBranchRef(owner: string, name: string, branch: string, sha: string): Promise<void> {
-    await safe(() => this.rest.rest.git.updateRef({ owner, repo: name, ref: `heads/${branch}`, sha, force: false }));
+    await safe(() =>
+      this.rest.rest.git.updateRef({
+        owner,
+        repo: name,
+        ref: `heads/${branch}`,
+        sha,
+        force: false,
+      }),
+    );
   }
 }

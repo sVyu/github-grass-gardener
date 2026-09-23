@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --check src test e2e playwright.config.ts vite.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
-    "@playwright/test": "^1.54.1",
+    "@playwright/test": "1.49.1",
     "@tailwindcss/vite": "^4.1.11",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "^16.3.0",
