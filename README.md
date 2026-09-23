@@ -1,43 +1,173 @@
 # GitHub Grass Gardener
 
-GitHub 기여 캘린더를 조회하고, 원하는 과거 날짜의 커밋을 계획해 독립 저장소의 기본 브랜치에 순서대로 발행하는 웹 MVP입니다. 발행 전 계획의 날짜를 옮기는 기능을 *Gardening*이라고 부릅니다. 이미 발행된 Git 이력의 날짜를 바꾸거나 강제 푸시하지 않습니다.
+GitHub Grass Gardener is a local-first web application for viewing your GitHub contribution calendar, planning commits for past dates, and publishing those commits to a repository's default branch.
 
-## 로컬 실행
+The project calls editing an unpublished commit plan **Gardening**. It never changes the dates of existing commits, rewrites published history, or force-pushes a branch.
 
-Node.js 18.18 이상과 pnpm 8을 준비한 뒤 실행합니다.
+> [!IMPORTANT]
+> A successful publish means that GitHub accepted the branch update. Whether a commit appears on your contribution calendar still depends on GitHub's contribution rules, account settings, and processing time.
+
+## Features
+
+- Connect to GitHub with a personal access token held only in browser memory.
+- Load your real GitHub contribution calendar.
+- Select dates and plan up to 20 commits per day and 100 commits per batch.
+- Move or edit planned commits before they are published.
+- Preview the target repository, branch, dates, and commit count before publishing.
+- Publish real content changes through GitHub's Git Database API.
+- Stop safely when the remote branch changes, permissions are insufficient, or GitHub applies a rate limit.
+- Navigate the calendar with a keyboard and distinguish states without relying on color alone.
+
+## How it works
+
+1. Connect a GitHub account with a personal access token.
+2. Select an existing repository or create a dedicated repository.
+3. Choose dates on the contribution calendar and set the desired commit counts.
+4. Review the complete plan and confirm publication explicitly.
+5. Publish commits sequentially and inspect the resulting commit SHAs.
+
+Each commit appends a real entry to `.grass-gardener/activity.jsonl`. Before publication, the application records the branch HEAD; immediately before writing, it checks that HEAD again. If the branch has changed, publication stops without writing anything.
+
+## Architecture
+
+The application follows a ports-and-adapters design. Domain code remains independent of React, browser APIs, and GitHub clients, while the application layer coordinates use cases through explicit interfaces.
+
+```mermaid
+flowchart TB
+    subgraph UI_Layer ["UI Layer (React + Tailwind CSS)"]
+        Pages["Pages (Connect, RepoSetup, Calendar, Editor, Preview, Result)"]
+        CustomCalendar["Custom Calendar Grid (53x7 A11y Grid)"]
+        UI_Store["Client State (Zustand: Plan, Selection, UI)"]
+        Server_State["Server State Cache (TanStack Query v5)"]
+    end
+
+    subgraph App_Layer ["Application Layer (Use Cases)"]
+        UC_Create["CreateCommitPlan"]
+        UC_Validate["ValidateRepository"]
+        UC_Publish["PublishCommitPlan"]
+        UC_Garden["MovePlannedCommit (Gardening)"]
+    end
+
+    subgraph Domain_Layer ["Domain Layer (Pure TypeScript)"]
+        CommitPlan["CommitPlan & CommitEntry"]
+        ContributionDay["ContributionDay & Calendar"]
+        ExecutionBatch["ExecutionBatch & CommitResult"]
+        DateUtils["DateUtils & Timezone Policy"]
+        Templates["Template Engine"]
+    end
+
+    subgraph Adapter_Layer ["Adapter Layer (Ports & Adapters)"]
+        direction TB
+        subgraph Ports ["Abstract Ports / Interfaces"]
+            IGitHubClient["IGitHubClient"]
+            ICredentialStore["ICredentialStore"]
+        end
+        subgraph Adapters ["Implementations"]
+            OctokitRest["GitHub REST Adapter (Git DB & Repos)"]
+            OctokitGraphQL["GitHub GraphQL Adapter (Calendar)"]
+            MemoryCred["Browser Memory Credential Store"]
+            ElectronCred["(Future) Electron Keychain Store"]
+        end
+    end
+
+    subgraph External_Services ["External Services"]
+        GitHub_REST["GitHub REST API (v2022-11-28)"]
+        GitHub_GQL["GitHub GraphQL API"]
+    end
+
+    Pages --> UI_Store
+    Pages --> Server_State
+    Pages --> CustomCalendar
+
+    Server_State --> UC_Validate
+    Server_State --> IGitHubClient
+    UI_Store --> UC_Create
+    UI_Store --> UC_Garden
+    Pages --> UC_Publish
+
+    UC_Create --> Domain_Layer
+    UC_Validate --> IGitHubClient
+    UC_Publish --> IGitHubClient
+    UC_Publish --> Domain_Layer
+    UC_Garden --> Domain_Layer
+
+    OctokitRest -.-> IGitHubClient
+    OctokitGraphQL -.-> IGitHubClient
+    MemoryCred -.-> ICredentialStore
+    ElectronCred -.-> ICredentialStore
+
+    OctokitRest --> GitHub_REST
+    OctokitGraphQL --> GitHub_GQL
+```
+
+See the [complete architecture and design document](docs/architecture.md#2-시스템-아키텍처-다이어그램) for layer responsibilities, control flows, and security decisions.
+
+## Safety model
+
+- Personal access tokens remain in memory and are never written to URLs, browser storage, repository files, fixtures, snapshots, or logs.
+- Archived, disabled, read-only, and protected default branches are rejected before publication.
+- Branch HEAD is checked during preview, before the batch starts, and before each commit.
+- Branch references are updated with `force: false`; the application does not rewrite published history.
+- GitHub writes are serialized and paced to reduce burst traffic. A rate-limit response stops the remaining batch.
+- Failed or interrupted batches preserve successful commits and report failed and skipped entries separately.
+- Future dates cannot be selected, and Gardening applies only to unpublished plans.
+
+For a public deployment, the current browser-supplied PAT flow should be replaced with a GitHub App or an OAuth/BFF design.
+
+## Requirements
+
+- Node.js 18.18 or later
+- pnpm 8
+- A GitHub personal access token
+
+## Getting started
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-브라우저에서 Vite가 출력한 로컬 주소로 접속합니다. PAT를 입력하고 저장소를 선택하거나 생성한 다음, 캘린더에서 날짜를 선택해 커밋 수를 정하고 `Review plan` → `Publish` 순서로 발행합니다. 실제 GitHub 계정 또는 저장소에 쓰는 작업이므로 발행 전에 대상 저장소·브랜치·날짜·개수를 확인하세요.
+Open the local URL printed by Vite, connect your GitHub account, and follow the workflow from repository setup to publication. Because publishing writes to a real GitHub repository, verify the repository, branch, dates, and commit counts in the review step.
 
-## GitHub 토큰
+## GitHub token permissions
 
-- 기존 저장소에 발행하려면 해당 저장소에 대한 읽기 및 `Contents: write` 권한이 필요합니다. 계정의 저장소 목록과 기여 캘린더도 조회할 수 있어야 합니다.
-- 앱에서 새 저장소를 만들려면 저장소 생성 권한이 추가로 필요합니다. Fine-grained PAT에서 생성이 거부될 수 있으므로, 그 경우 기존 저장소를 선택하거나 적절한 권한의 토큰을 사용하세요.
-- 확인된 이메일 조회에는 계정 이메일 읽기 권한이 필요할 수 있습니다. 조회가 거부되면 GitHub 계정 ID 기반의 `noreply` 주소를 사용합니다.
-- PAT는 브라우저 탭의 메모리에만 두며, 새로고침 또는 연결 해제 시 사라집니다. 브라우저의 영구 저장소나 URL에 기록하지 않습니다. 토큰은 이 앱을 실행하는 신뢰할 수 있는 환경에서만 입력하세요.
+When creating a fine-grained personal access token, select the repository you want to use and configure these permissions:
 
-커밋이 프로필 잔디에 반영되는지는 GitHub의 기여 정책, 계정 설정 및 집계 시점에 따릅니다. 앱의 `Published` 표시는 GitHub가 브랜치 갱신을 받아들였다는 뜻이지 기여 집계가 확정됐다는 뜻은 아닙니다. 비공개 저장소 기여를 프로필에 표시하려면 GitHub 계정 설정도 확인하세요.
+| Permission | Access | Required | Used for |
+| --- | --- | --- | --- |
+| **Repository permissions → Contents** | **Read and write** | Yes | Reading the current branch and publishing commits |
+| **Account permissions → Email addresses** | **Read-only** | Recommended | Loading verified email addresses for the commit author |
 
-## 안전 범위
+The **Contents: Read and write** permission is required to publish. The **Email addresses: Read-only** permission is optional; if it is unavailable, the application uses your GitHub-provided `noreply` address instead.
 
-- Fork 저장소에는 기여 집계 경고를 표시합니다. 보관·비활성화·쓰기 불가·보호된 기본 브랜치에는 발행을 차단합니다.
-- 계획 미리보기와 발행 직전에 원격 HEAD를 확인합니다. 예상 HEAD가 달라졌으면 작업을 중단합니다.
-- 각 커밋은 `.grass-gardener/activity.jsonl`에 실제 변경을 남기며, 브랜치 참조는 `force: false`로만 갱신합니다.
-- 일일 최대 20개, 배치 최대 100개의 커밋을 허용합니다. 미래 날짜는 선택할 수 없습니다.
-- 현재 Gardening은 발행 전 초안에만 적용됩니다. 발행된 커밋은 앱에서 수정하지 않습니다.
+Additional permissions may be required in these cases:
 
-## 검증
+- **Create a repository:** the token must permit repository creation. Fine-grained personal access tokens may reject this operation; select an existing repository if that happens.
+
+Use a dedicated, least-privilege token and enter it only in a trusted local environment. Disconnecting or refreshing the page clears the token.
+
+## Development commands
 
 ```bash
 pnpm typecheck
 pnpm lint
+pnpm test
 pnpm test:coverage
 pnpm build
 pnpm test:e2e
 ```
 
-E2E 테스트는 설치된 Microsoft Edge를 사용하며 GitHub API를 모킹하므로 실제 저장소를 변경하지 않습니다. 제품·도메인·아키텍처·위험·구현 계획은 [`docs/`](docs/)에서, 에이전트 개발 규칙은 [`AGENTS.md`](AGENTS.md)에서 확인할 수 있습니다.
+The end-to-end suite uses an installed Microsoft Edge browser and mocked GitHub API responses, so it does not modify a real repository.
+
+## Documentation
+
+- [Product definition](docs/product-definition.md)
+- [Domain model](docs/domain-model.md)
+- [Architecture and design](docs/architecture.md)
+- [Authentication and security](docs/auth-and-security.md)
+- [Commit publication flow](docs/commit-publication-flow.md)
+- [GitHub contribution rules](docs/github-contribution-rules.md)
+- [Trade-offs and risks](docs/trade-offs-and-risks.md)
+- [Implementation plan](docs/implementation-plan.md)
+
+Development workflow and repository-specific safety rules are documented in [AGENTS.md](AGENTS.md).
