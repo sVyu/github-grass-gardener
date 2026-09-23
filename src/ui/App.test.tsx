@@ -86,8 +86,11 @@ describe('MVP user flow', () => {
     await user.click(screen.getByRole('button', { name: /Review plan/ }));
     expect(await screen.findByText('dated commits')).toBeInTheDocument();
     expect(screen.getByText('1', { selector: '.preview-number' })).toBeInTheDocument();
+    expect(screen.getByText(/Large batches can take several minutes/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Publish 1 commits/ }));
-    expect(await screen.findByText('Your garden is planted.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Your garden is planted.', {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(client.updateBranchRef).toHaveBeenCalled();
   });
 

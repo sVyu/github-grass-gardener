@@ -102,6 +102,50 @@ describe('publishing a commit plan', () => {
     expect(progress).toHaveBeenCalled();
   });
 
+  it('spaces mutating requests and branch publications within a batch', async () => {
+    const { client, calls, setHead } = fakePort();
+    const sequence: string[] = [];
+    calls.createBlob.mockImplementation(async () => {
+      sequence.push('blob');
+      return 'blob';
+    });
+    calls.createTree.mockImplementation(async () => {
+      sequence.push('tree');
+      return 'tree';
+    });
+    calls.createCommit.mockImplementation(async () => {
+      sequence.push('commit');
+      return `commit-${sequence.filter((item) => item === 'commit').length}`;
+    });
+    calls.updateBranchRef.mockImplementation(async (_owner, _name, _branch, sha) => {
+      sequence.push('ref');
+      setHead(sha);
+    });
+    const result = await publishCommitPlan(plan, client, {
+      wait: async (milliseconds) => {
+        sequence.push(`wait:${milliseconds}`);
+      },
+    });
+    expect(result.status).toBe('completed');
+    expect(sequence).toEqual([
+      'blob',
+      'wait:1000',
+      'tree',
+      'wait:1000',
+      'commit',
+      'wait:1000',
+      'ref',
+      'wait:10000',
+      'blob',
+      'wait:1000',
+      'tree',
+      'wait:1000',
+      'commit',
+      'wait:1000',
+      'ref',
+    ]);
+  });
+
   it('stops after a failed ref update and keeps earlier successes', async () => {
     const { client, calls } = fakePort();
     calls.updateBranchRef.mockImplementationOnce(async () => {
@@ -112,6 +156,21 @@ describe('publishing a commit plan', () => {
     expect(result.successCount).toBe(0);
     expect(result.failedCount).toBe(1);
     expect(calls.createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops on a rate limit and reports the safe retry delay without retrying a write', async () => {
+    const { client, calls } = fakePort();
+    const rateLimitError = new Error(
+      'GitHub rate limit reached. Wait at least 12 seconds before retrying.',
+    );
+    rateLimitError.name = 'GitHubApiError';
+    calls.createBlob.mockRejectedValueOnce(rateLimitError);
+    const result = await publishCommitPlan(plan, client, { wait: async () => {} });
+    expect(result.status).toBe('partial_failure');
+    expect(result.results[0]?.error).toContain('12 seconds');
+    expect(calls.createBlob).toHaveBeenCalledTimes(1);
+    expect(calls.createCommit).not.toHaveBeenCalled();
+    expect(calls.updateBranchRef).not.toHaveBeenCalled();
   });
 
   it('recognizes an update that succeeded despite a lost response', async () => {
@@ -127,8 +186,8 @@ describe('publishing a commit plan', () => {
 
   it('stops when another writer changes the branch between commits', async () => {
     const { client, calls, setHead } = fakePort();
-    const wait = vi.fn(async () => {
-      setHead('foreign-head');
+    const wait = vi.fn(async (milliseconds: number) => {
+      if (milliseconds === 10000) setHead('foreign-head');
     });
     const result = await publishCommitPlan(plan, client, {
       wait,
@@ -136,7 +195,7 @@ describe('publishing a commit plan', () => {
     expect(result.status).toBe('aborted');
     expect(result.successCount).toBe(1);
     expect(calls.createCommit).toHaveBeenCalledTimes(1);
-    expect(wait).toHaveBeenCalledTimes(1);
+    expect(wait.mock.calls).toEqual([[1000], [1000], [1000], [10000]]);
     expect(result.results[1]?.error).toContain('Expected commit-1, observed foreign-head');
   });
 
@@ -147,13 +206,24 @@ describe('publishing a commit plan', () => {
       .mockResolvedValueOnce('head-0')
       .mockResolvedValueOnce('head-0')
       .mockResolvedValueOnce('head-0');
-    const wait = vi.fn(async () => {
-      expect(calls.createCommit).toHaveBeenCalledTimes(1);
+    const wait = vi.fn(async (milliseconds: number) => {
+      if (milliseconds === 250 || milliseconds === 750)
+        expect(calls.createCommit).toHaveBeenCalledTimes(1);
     });
     const result = await publishCommitPlan(plan, client, { wait });
     expect(result.status).toBe('completed');
     expect(result.successCount).toBe(2);
-    expect(wait.mock.calls).toEqual([[1000], [250], [750]]);
+    expect(wait.mock.calls).toEqual([
+      [1000],
+      [1000],
+      [1000],
+      [10000],
+      [250],
+      [750],
+      [1000],
+      [1000],
+      [1000],
+    ]);
     expect(calls.updateBranchRef).toHaveBeenCalledTimes(2);
   });
 
@@ -182,7 +252,7 @@ describe('publishing a commit plan', () => {
     const result = await publishCommitPlan(plan, client, { wait });
     expect(result.status).toBe('aborted');
     expect(result.finalHeadSha).toBe('foreign-head');
-    expect(wait.mock.calls).toEqual([[1000], [250]]);
+    expect(wait.mock.calls).toEqual([[1000], [1000], [1000], [10000], [250]]);
     expect(calls.updateBranchRef).toHaveBeenCalledTimes(1);
   });
 

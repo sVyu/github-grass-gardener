@@ -810,7 +810,8 @@ export function App({ createClient, credentialStore }: Props) {
                 </div>
                 <div className="notice warning">
                   GitHub may take time to show contributions. The repository's current HEAD must
-                  still match this preview when publication starts.
+                  still match this preview when publication starts. Large batches can take several
+                  minutes because writes and branch updates are deliberately paced.
                 </div>
                 <div className="action-bar">
                   <button className="secondary-button" onClick={() => setStage('editor')}>

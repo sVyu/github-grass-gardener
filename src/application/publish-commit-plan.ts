@@ -9,6 +9,9 @@ interface PublishOptions {
 }
 
 const activeBatches = new WeakMap<GitHubPort, Set<string>>();
+const MUTATION_INTERVAL_MS = 1_000;
+// The cooldown plus three inter-write waits keeps ref updates below six per minute.
+const PUBLICATION_INTERVAL_MS = 10_000;
 
 function safeError(error: unknown): string {
   if (error instanceof Error && error.name === 'GitHubApiError') return error.message;
@@ -122,7 +125,7 @@ export async function publishCommitPlan(
         report();
         continue;
       }
-      if (index > 0) await wait(1000);
+      if (batch.successCount > 0) await wait(PUBLICATION_INTERVAL_MS);
       let proposedSha: string | undefined;
       try {
         const current = await readConfirmedHead(head);
@@ -141,7 +144,9 @@ export async function publishCommitPlan(
         const baseTree = await github.getCommitTree(plan.targetRepo, head);
         const nextContent = buildActivityLog(content, plan.id, entry);
         const blob = await github.createBlob(plan.targetRepo, nextContent);
+        await wait(MUTATION_INTERVAL_MS);
         const tree = await github.createTree(plan.targetRepo, baseTree, blob);
+        await wait(MUTATION_INTERVAL_MS);
         proposedSha = await github.createCommit(
           plan.targetRepo,
           head,
@@ -150,6 +155,7 @@ export async function publishCommitPlan(
           entry.authorDateISO,
           plan.author,
         );
+        await wait(MUTATION_INTERVAL_MS);
         try {
           await github.updateBranchRef(
             plan.targetRepo.owner,

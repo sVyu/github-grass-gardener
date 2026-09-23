@@ -107,6 +107,35 @@ describe('GitHub API adapter', () => {
     ).toEqual(['7+octocat@users.noreply.github.com']);
   });
 
+  it('reports a secondary rate limit and its retry delay without mistaking it for missing email scope', async () => {
+    server.use(
+      http.get('https://api.github.com/user/emails', () =>
+        HttpResponse.json(
+          { message: 'You have exceeded a secondary rate limit.' },
+          { status: 403, headers: { 'retry-after': '12' } },
+        ),
+      ),
+    );
+    const client = new GitHubClient('test-token');
+    await expect(
+      client.getVerifiedEmails({ login: 'octocat', id: 7, name: 'Octocat', avatarUrl: '' }),
+    ).rejects.toThrow(/rate limit.*12 seconds/i);
+  });
+
+  it('reports a 429 retry delay to the publisher', async () => {
+    server.use(
+      http.patch('https://api.github.com/repos/octocat/grass/git/refs/heads%2Fmain', () =>
+        HttpResponse.json(
+          { message: 'Too many requests' },
+          { status: 429, headers: { 'retry-after': '5' } },
+        ),
+      ),
+    );
+    await expect(
+      new GitHubClient('test-token').updateBranchRef('octocat', 'grass', 'main', 'new-sha'),
+    ).rejects.toThrow(/rate limit.*5 seconds/i);
+  });
+
   it('normalizes the contribution calendar returned by GraphQL', async () => {
     server.use(
       http.post('https://api.github.com/graphql', () =>

@@ -80,7 +80,7 @@ gantt
   - `@octokit/rest` 연동
   - 저수준 파이프라인 함수: `getBranchHeadRef` → `createBlob` → `createTree` → `createCommit` → `updateRef`
   - `force: false` 검증 (Fast-forward 불가능 시 안전 중단)
-  - 직렬 Throttling 큐 (뮤테이션 간 1000ms sleep) 및 `Retry-After` 백오프 구현
+  - 직렬 Throttling (쓰기 요청 간 1000ms, ref 발행 간 최소 10초) 및 속도 제한 시 `Retry-After` 안내 후 중단
 - [ ] **GitHub 저장소 및 사용자 클라이언트 (`src/adapters/github/github-repo.client.ts`)**:
   - `GET /user`, `GET /user/emails` (verified 이메일만 추출)
   - `GET /user/repos` (Fork/Archived/Disabled/Permissions 필터링)

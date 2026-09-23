@@ -46,22 +46,40 @@ function retryAfterOf(error: unknown): number | undefined {
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
 }
 
+function rateLimited(
+  error: unknown,
+  status: number | undefined,
+  retryAfterMs: number | undefined,
+): boolean {
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  if (retryAfterMs !== undefined) return true;
+  if (typeof error !== 'object' || error === null) return false;
+  const details = error as { message?: unknown; response?: { headers?: Record<string, unknown> } };
+  return (
+    details.response?.headers?.['x-ratelimit-remaining'] === '0' ||
+    (typeof details.message === 'string' &&
+      /(?:secondary|api) rate limit|rate limit exceeded/i.test(details.message))
+  );
+}
+
 export class GitHubApiError extends Error {
   constructor(
     public readonly status: number | undefined,
     public readonly retryAfterMs?: number,
+    public readonly isRateLimited = false,
   ) {
     super(
-      status === 401
-        ? 'GitHub token is invalid or expired.'
-        : status === 403
-          ? 'GitHub denied access. Check the token permissions or rate limit.'
-          : status === 404
-            ? 'The GitHub resource was not found or is not accessible.'
-            : status === 409 || status === 422
-              ? 'GitHub rejected the branch update. Refresh the repository state.'
-              : status === 429
-                ? 'GitHub rate limit reached. Wait before retrying.'
+      isRateLimited
+        ? `GitHub rate limit reached.${retryAfterMs ? ` Wait at least ${Math.ceil(retryAfterMs / 1000)} seconds before retrying.` : ' Wait before retrying.'}`
+        : status === 401
+          ? 'GitHub token is invalid or expired.'
+          : status === 403
+            ? 'GitHub denied access. Check the token permissions.'
+            : status === 404
+              ? 'The GitHub resource was not found or is not accessible.'
+              : status === 409 || status === 422
+                ? 'GitHub rejected the branch update. Refresh the repository state.'
                 : 'GitHub request failed. Try again later.',
     );
     this.name = 'GitHubApiError';
@@ -73,7 +91,9 @@ async function safe<T>(request: () => Promise<T>): Promise<T> {
     return await request();
   } catch (error) {
     if (error instanceof GitHubApiError) throw error;
-    throw new GitHubApiError(statusOf(error), retryAfterOf(error));
+    const status = statusOf(error);
+    const retryAfterMs = retryAfterOf(error);
+    throw new GitHubApiError(status, retryAfterMs, rateLimited(error, status, retryAfterMs));
   }
 }
 
@@ -189,7 +209,8 @@ export class GitHubClient implements GitHubPort {
         ...new Set([noreply, ...data.filter((item) => item.verified).map((item) => item.email)]),
       ];
     } catch (error) {
-      if (error instanceof GitHubApiError && error.status === 403) return [noreply];
+      if (error instanceof GitHubApiError && error.status === 403 && !error.isRateLimited)
+        return [noreply];
       throw error;
     }
   }

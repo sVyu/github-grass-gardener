@@ -94,11 +94,12 @@ flowchart TD
 1. **직렬 파이프라인 (Sequential Execution)**:
    - 커밋 생성(Blob → Tree → Commit → Ref)은 반드시 1개씩 순차적으로 실행한다.
 2. **인위적 지연 (Inter-request Sleep)**:
-   - 커밋 1회 완료 후 다음 커밋 시작 전 최소 **1,000ms ~ 1,500ms** 대기한다.
+   - Blob·Tree·Commit·Ref 쓰기 요청 사이에 각각 최소 **1,000ms** 대기한다.
+   - 성공한 ref 갱신 후 다음 커밋 시작까지 **10,000ms** 대기한다. GitHub의 [저장소당 분당 6회 push 권장치](https://docs.github.com/en/repositories/creating-and-managing-repositories/repository-limits)를 안전 여유를 두고 따른다. 이는 잔디 집계의 속도나 완료를 보장하지 않는다.
 3. **낙관적 락 (Optimistic Locking)**:
    - 발행 직전 현재 원격 HEAD SHA가 계획 생성 시점의 `baseHeadSha`와 일치하는지 대조하여 다른 곳에서의 변경으로 인한 이력 꼬임을 원천 차단한다.
 4. **Retry-After 헤더 존중**:
-   - `429` 또는 `Retry-After` 헤더 응답 시, 지시된 초만큼 카운트다운 타이머를 실행하고 사용자에게 대기 상태를 실시간 표시한다.
+   - 속도 제한 `403`/`429` 응답 시 더 이상 쓰지 않고, `Retry-After`가 있으면 최소 대기 시간을 안전한 오류 문구로 표시한다. 불확실한 ref 쓰기의 자동 재시도는 하지 않는다.
 
 ---
 
@@ -118,7 +119,7 @@ flowchart TD
 | 리스크 항목                         | 발생 가능성 | 영향도 | 완화 전략                                                           |
 | :---------------------------------- | :---------: | :----: | :------------------------------------------------------------------ |
 | **토큰 유출 (XSS)**                 |    중간     |  높음  | 메모리 전용 보관, CSP 헤더, 로그 마스킹                             |
-| **API 차단 (Secondary Rate Limit)** |    높음     |  중간  | 1초 직렬 쓰기 Throttling, 배치 크기 제한(~100건)                    |
+| **API 차단 (Secondary Rate Limit)** |    높음     |  중간  | 쓰기 요청 간 1초, ref 발행 간 10초 지연 및 제한 응답 시 중단        |
 | **원격 커밋 충돌 (409 Conflict)**   |    낮음     |  높음  | 발행 전 HEAD SHA 대조, `force: false` 적용                          |
 | **잔디 미반영에 따른 사용자 혼선**  |    높음     |  낮음  | 사전 Preflight Check(이메일, Fork, 브랜치 검증) 및 기여 비보장 고지 |
 | **캘린더 드래그 조작 렉/성능 저하** |    낮음     |  중간  | 53×7 셀의 불필요한 리렌더링 방지 (React.memo, Roving tabindex)      |
