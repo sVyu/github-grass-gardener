@@ -80,7 +80,7 @@ gantt
   - `@octokit/rest` 연동
   - 저수준 파이프라인 함수: `getBranchHeadRef` → `createBlob` → `createTree` → `createCommit` → `updateRef`
   - `force: false` 검증 (Fast-forward 불가능 시 안전 중단)
-  - 직렬 Throttling 큐 (뮤테이션 간 1000ms sleep) 및 `Retry-After` 백오프 구현
+  - 직렬 Throttling (쓰기 요청 간 1000ms, ref 발행 간 최소 10초) 및 속도 제한 시 `Retry-After` 안내 후 중단
 - [ ] **GitHub 저장소 및 사용자 클라이언트 (`src/adapters/github/github-repo.client.ts`)**:
   - `GET /user`, `GET /user/emails` (verified 이메일만 추출)
   - `GET /user/repos` (Fork/Archived/Disabled/Permissions 필터링)
@@ -139,6 +139,17 @@ gantt
 - [ ] `docs/adr/`: 아키텍처 결정 기록(ADR) 작성
 - [ ] 루트 `AGENTS.md`: 에이전트 작업 원칙 및 안전 수칙 명시
 - [ ] `README.md`: 프로젝트 개요, 로컬 실행 방법, PAT 발급 가이드 갱신
+
+---
+
+### Phase 7: 후속 고도화 TODO — 묶음 커밋 발행
+
+현재 MVP는 커밋마다 기본 브랜치 ref를 갱신한다. 과거 날짜 지정 때문에 필요한 제약은 아니며, 여러 커밋 객체를 부모 체인으로 먼저 생성한 뒤 마지막 SHA로 ref를 한 번 갱신하는 방식도 가능하다. 한 번에 전체 계획을 공개하는 방식과 일정 개수씩 공개하는 청크 방식의 크기·UX는 구현 전에 결정한다.
+
+- [ ] **발행 단위 설계**: 전체 계획 1회 갱신과 청크별 1회 갱신을 비교하고, 선택한 단위와 실패 시 사용자에게 보일 진행률·재개 정책을 명시한다. 묶음이 GitHub 기여 집계 속도를 높인다고 가정하지 않는다.
+- [ ] **안전한 Git 객체 체인**: 검증된 HEAD부터 각 커밋의 Blob → Tree → Commit을 날짜·이메일·실제 내용 변경과 함께 순차 생성한다. ref 갱신 직전에 HEAD를 다시 확인하고 `force: false`만 사용한다.
+- [ ] **결과 판정과 복구**: ref 갱신이 확인된 뒤에만 해당 묶음의 모든 항목을 성공으로 기록한다. 응답 유실 시 HEAD를 재조회하고, 충돌·속도 제한·새로고침 후에는 활동 로그와 원격 HEAD를 대조해 중복 발행 없이 남은 항목을 재계획한다. 토큰은 계속 메모리에만 둔다.
+- [ ] **TDD 검증**: 단일 ref 갱신의 전체 성공, 최종 갱신 전 중단으로 인한 미발행, 청크 간 부분 성공, 외부 HEAD 변경, 응답 유실, 속도 제한 및 새로고침 후 재접속 시나리오를 테스트한다. 객체 생성 요청의 속도 제한은 별도로 유지한다.
 
 ---
 

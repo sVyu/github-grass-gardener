@@ -195,7 +195,7 @@ sequenceDiagram
         UseCase-->>Preview: 409 Conflict 발생! 원격 이력 변경됨 안내
         Preview-->>User: 중단 알림 및 최신 이력 갱신 유도
     else HEAD 일치
-        loop 각 커밋 엔트리 순차 실행 (1초 Throttling 간격)
+        loop 각 커밋 엔트리 순차 실행 (쓰기 간 1초, ref 발행 간 최소 10초)
             UseCase->>GitDB: POST /git/blobs (활동 로그 기록)
             GitDB-->>UseCase: blobSha
             UseCase->>GitDB: POST /git/trees (base_tree 유지)
@@ -223,4 +223,5 @@ sequenceDiagram
    - 사전에 보호 브랜치(Branch Protection) 여부 및 PR 필수 여부를 확인하여 권한 오류를 조기에 감지한다.
 3. **API Rate Limiting 방어**
    - 커밋 생성 루프는 병렬(`Promise.all`)이 아닌 엄격한 직렬(Sequential) 방식으로 실행한다.
-   - 각 커밋 생성 사이 최소 1000ms의 대기 시간(sleep)을 두어 GitHub 보조 속도 제한(Secondary Rate Limit)을 준수한다.
+   - Blob·Tree·Commit·Ref 쓰기 요청 사이 최소 1000ms, 성공한 ref 갱신 후 다음 커밋 시작 전 10초를 기다려 GitHub API 제한과 저장소 push 빈도 권장치에 여유를 둔다.
+   - GitHub의 속도 제한이 실제로 반환되면 자동 재시도 없이 멈추고 `Retry-After` 대기 시간을 안내한다. 이 간격만으로 기여 집계나 제한 회피가 보장되지는 않는다.
