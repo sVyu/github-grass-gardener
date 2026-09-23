@@ -7,6 +7,13 @@ The project calls editing an unpublished commit plan **Gardening**. It never cha
 > [!IMPORTANT]
 > A successful publish means that GitHub accepted the branch update. Whether a commit appears on your contribution calendar still depends on GitHub's contribution rules, account settings, and processing time.
 
+<img width="1278" height="672" alt="Cap 2026-09-24 01-36-22" src="https://github.com/user-attachments/assets/febd9516-48fc-4646-92bc-71498ca2d413" />
+
+<img width="1399" height="584" alt="Cap 2026-09-24 01-46-30" src="https://github.com/user-attachments/assets/fcdc4913-a1ad-40ba-b206-bcc5f577b44c" />
+
+<img width="929" height="221" alt="Cap 2026-09-24 04-42-44" src="https://github.com/user-attachments/assets/dc5e1493-83cf-476d-b28d-69b2857d27ec" />
+<hr/>
+
 ## Features
 
 - Connect to GitHub with a personal access token held only in browser memory.
