@@ -23,6 +23,13 @@ const GRAPHQL_CALENDAR = `
   }
 `;
 
+// Octokit does not forward a request.cache option to fetch. Set it on the
+// transport itself so branch checks cannot reuse a pre-publication response.
+const fetchWithoutCache: typeof globalThis.fetch = (input, init) => {
+  const options = { ...init, cache: 'no-store' as const };
+  return globalThis.fetch(input, options);
+};
+
 function statusOf(error: unknown): number | undefined {
   if (typeof error === 'object' && error !== null && 'status' in error) {
     const status = (error as { status?: unknown }).status;
@@ -231,6 +238,7 @@ export class GitHubClient implements GitHubPort {
         owner: repo.owner,
         repo: repo.name,
         ref: `heads/${repo.defaultBranch}`,
+        request: { fetch: fetchWithoutCache },
       }),
     );
     return data.object.sha;
@@ -242,6 +250,7 @@ export class GitHubClient implements GitHubPort {
         owner: repo.owner,
         repo: repo.name,
         branch: repo.defaultBranch,
+        request: { fetch: fetchWithoutCache },
       }),
     );
     return data.protected;
@@ -254,14 +263,15 @@ export class GitHubClient implements GitHubPort {
     return data.tree.sha;
   }
 
-  async getActivityContent(repo: RepositoryRef): Promise<string> {
+  async getActivityContent(repo: RepositoryRef, ref = repo.defaultBranch): Promise<string> {
     try {
       const { data } = await safe(() =>
         this.rest.rest.repos.getContent({
           owner: repo.owner,
           repo: repo.name,
           path: '.grass-gardener/activity.jsonl',
-          ref: repo.defaultBranch,
+          ref,
+          request: { fetch: fetchWithoutCache },
         }),
       );
       if (

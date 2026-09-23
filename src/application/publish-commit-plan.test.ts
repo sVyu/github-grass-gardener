@@ -97,6 +97,7 @@ describe('publishing a commit plan', () => {
     );
     expect(calls.createBlob.mock.calls[1]?.[1]).toContain(plan.entries[0]!.id);
     expect(calls.createBlob.mock.calls[1]?.[1]).toContain(plan.entries[1]!.id);
+    expect(calls.getActivityContent).toHaveBeenCalledWith(repo, 'head-0');
     expect(wait).toHaveBeenCalledWith(1000);
     expect(progress).toHaveBeenCalled();
   });
@@ -126,14 +127,77 @@ describe('publishing a commit plan', () => {
 
   it('stops when another writer changes the branch between commits', async () => {
     const { client, calls, setHead } = fakePort();
+    const wait = vi.fn(async () => {
+      setHead('foreign-head');
+    });
     const result = await publishCommitPlan(plan, client, {
-      wait: async () => {
-        setHead('foreign-head');
-      },
+      wait,
     });
     expect(result.status).toBe('aborted');
     expect(result.successCount).toBe(1);
     expect(calls.createCommit).toHaveBeenCalledTimes(1);
+    expect(wait).toHaveBeenCalledTimes(1);
+    expect(result.results[1]?.error).toContain('Expected commit-1, observed foreign-head');
+  });
+
+  it('confirms a lagging HEAD before creating the next commit', async () => {
+    const { client, calls } = fakePort();
+    calls.getBranchHead
+      .mockResolvedValueOnce('head-0')
+      .mockResolvedValueOnce('head-0')
+      .mockResolvedValueOnce('head-0')
+      .mockResolvedValueOnce('head-0');
+    const wait = vi.fn(async () => {
+      expect(calls.createCommit).toHaveBeenCalledTimes(1);
+    });
+    const result = await publishCommitPlan(plan, client, { wait });
+    expect(result.status).toBe('completed');
+    expect(result.successCount).toBe(2);
+    expect(wait.mock.calls).toEqual([[1000], [250], [750]]);
+    expect(calls.updateBranchRef).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds confirmation retries and preserves successes when HEAD stays behind', async () => {
+    const { client, calls } = fakePort();
+    calls.getBranchHead.mockResolvedValue('head-0');
+    const wait = vi.fn(async () => {});
+    const result = await publishCommitPlan(plan, client, { wait });
+    expect(result.status).toBe('aborted');
+    expect(result.successCount).toBe(1);
+    expect(result.results[1]).toMatchObject({ status: 'skipped' });
+    expect(result.results[1]?.error).toContain('Could not confirm the latest branch HEAD');
+    expect(result.results[1]?.error).toContain('Expected commit-1, observed head-0');
+    expect(calls.getBranchHead).toHaveBeenCalledTimes(5);
+    expect(calls.createCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops confirming as soon as a different writer appears', async () => {
+    const { client, calls } = fakePort();
+    calls.getBranchHead
+      .mockResolvedValueOnce('head-0')
+      .mockResolvedValueOnce('head-0')
+      .mockResolvedValueOnce('head-0')
+      .mockResolvedValueOnce('foreign-head');
+    const wait = vi.fn(async () => {});
+    const result = await publishCommitPlan(plan, client, { wait });
+    expect(result.status).toBe('aborted');
+    expect(result.finalHeadSha).toBe('foreign-head');
+    expect(wait.mock.calls).toEqual([[1000], [250]]);
+    expect(calls.updateBranchRef).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirms a lost update response after a lagging read without resending the write', async () => {
+    const { client, calls, setHead } = fakePort();
+    calls.updateBranchRef.mockImplementationOnce(async (_owner, _name, _branch, sha) => {
+      setHead(sha);
+      calls.getBranchHead.mockResolvedValueOnce('head-0');
+      throw new Error('response lost');
+    });
+    const result = await publishCommitPlan(plan, client, { wait: async () => {} });
+    expect(result.status).toBe('completed');
+    expect(result.successCount).toBe(2);
+    expect(calls.updateBranchRef).toHaveBeenCalledTimes(2);
+    expect(calls.createCommit).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the first success when a later update fails', async () => {

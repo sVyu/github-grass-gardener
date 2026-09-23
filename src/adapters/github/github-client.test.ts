@@ -2,6 +2,20 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
 import { GitHubClient } from './github-client';
+import type { RepositoryRef } from '../../domain/models';
+
+const repo: RepositoryRef = {
+  owner: 'octocat',
+  name: 'grass',
+  fullName: 'octocat/grass',
+  defaultBranch: 'main',
+  isPrivate: true,
+  isFork: false,
+  isArchived: false,
+  isDisabled: false,
+  hasPushAccess: true,
+  isProtected: false,
+};
 
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -9,6 +23,37 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 describe('GitHub API adapter', () => {
+  it('bypasses HTTP cache for mutable branch state and reads activity at the checked SHA', async () => {
+    const requests: Request[] = [];
+    server.use(
+      http.get('https://api.github.com/repos/octocat/grass/git/ref/heads%2Fmain', ({ request }) => {
+        requests.push(request);
+        return HttpResponse.json({ object: { sha: 'checked-head' } });
+      }),
+      http.get('https://api.github.com/repos/octocat/grass/branches/main', ({ request }) => {
+        requests.push(request);
+        return HttpResponse.json({ protected: false });
+      }),
+      http.get(
+        'https://api.github.com/repos/octocat/grass/contents/.grass-gardener%2Factivity.jsonl',
+        ({ request }) => {
+          requests.push(request);
+          return HttpResponse.json({
+            type: 'file',
+            encoding: 'base64',
+            content: btoa('{"existing":true}\n'),
+          });
+        },
+      ),
+    );
+    const client = new GitHubClient('test-token');
+    expect(await client.getBranchHead(repo)).toBe('checked-head');
+    expect(await client.isBranchProtected(repo)).toBe(false);
+    expect(await client.getActivityContent(repo, 'checked-head')).toBe('{"existing":true}\n');
+    expect(requests.map((request) => request.cache)).toEqual(['no-store', 'no-store', 'no-store']);
+    expect(new URL(requests[2]!.url).searchParams.get('ref')).toBe('checked-head');
+  });
+
   it('loads identity, verified email, and normalized repositories', async () => {
     server.use(
       http.get('https://api.github.com/user', () =>

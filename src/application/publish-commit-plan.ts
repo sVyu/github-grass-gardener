@@ -57,6 +57,21 @@ export async function publishCommitPlan(
   activeBatches.set(github, active);
 
   const batch = startBatch(plan, now);
+  const previousHeads = new Set<string>();
+  const readConfirmedHead = async (
+    expected: string,
+    knownPrevious: ReadonlySet<string> = previousHeads,
+  ): Promise<string> => {
+    let observed = await github.getBranchHead(plan.targetRepo);
+    // Only a known earlier HEAD can be a delayed read of our own publication.
+    // Never retry a foreign HEAD or proceed with a write before a match.
+    for (const delay of [250, 750]) {
+      if (observed === expected || !knownPrevious.has(observed)) break;
+      await wait(delay);
+      observed = await github.getBranchHead(plan.targetRepo);
+    }
+    return observed;
+  };
   const report = () => options.onProgress?.({ ...batch, results: [...batch.results] });
   const skipRemaining = (entries: CommitEntry[], message: string) => {
     for (const entry of entries) {
@@ -77,13 +92,16 @@ export async function publishCommitPlan(
     if (head !== plan.baseHeadSha) {
       batch.status = 'aborted';
       batch.finalHeadSha = head;
-      skipRemaining(plan.entries, 'Remote HEAD changed after the plan was created.');
+      skipRemaining(
+        plan.entries,
+        `Remote HEAD changed after the plan was created. Expected ${plan.baseHeadSha}, observed ${head}. Review a new plan before publishing.`,
+      );
       batch.completedAt = now().toISOString();
       report();
       return batch;
     }
 
-    let content = await github.getActivityContent(plan.targetRepo);
+    let content = await github.getActivityContent(plan.targetRepo, head);
     const existingIds = publishedIds(content, plan.id);
     const pending = plan.entries.filter(
       (entry) => entry.status === 'planned' || entry.status === 'failed',
@@ -107,11 +125,17 @@ export async function publishCommitPlan(
       if (index > 0) await wait(1000);
       let proposedSha: string | undefined;
       try {
-        const current = await github.getBranchHead(plan.targetRepo);
+        const current = await readConfirmedHead(head);
         if (current !== head) {
           batch.status = 'aborted';
           batch.finalHeadSha = current;
-          skipRemaining(pending.slice(index), 'Remote HEAD changed during publication.');
+          const reason = previousHeads.has(current)
+            ? 'Could not confirm the latest branch HEAD after repeated reads.'
+            : 'Remote HEAD changed during publication.';
+          skipRemaining(
+            pending.slice(index),
+            `${reason} Expected ${head}, observed ${current}. Review a new plan before publishing.`,
+          );
           break;
         }
         const baseTree = await github.getCommitTree(plan.targetRepo, head);
@@ -135,9 +159,10 @@ export async function publishCommitPlan(
           );
         } catch (error) {
           // The response can be lost after GitHub advances the ref. Check before reporting failure.
-          const observed = await github.getBranchHead(plan.targetRepo);
+          const observed = await readConfirmedHead(proposedSha, new Set([...previousHeads, head]));
           if (observed !== proposedSha) throw error;
         }
+        previousHeads.add(head);
         head = proposedSha;
         content = nextContent;
         batch.successCount += 1;

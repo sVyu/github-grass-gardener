@@ -16,7 +16,7 @@ export interface GitHubPort {
   isBranchProtected(repo: RepositoryRef): Promise<boolean>;
   getBranchHead(repo: RepositoryRef): Promise<string>;
   getCommitTree(repo: RepositoryRef, sha: string): Promise<string>;
-  getActivityContent(repo: RepositoryRef): Promise<string>;
+  getActivityContent(repo: RepositoryRef, ref?: string): Promise<string>;
   createBlob(repo: RepositoryRef, content: string): Promise<string>;
   createTree(repo: RepositoryRef, baseTreeSha: string, blobSha: string): Promise<string>;
   createCommit(
