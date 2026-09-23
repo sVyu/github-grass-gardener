@@ -12,7 +12,6 @@ The project calls editing an unpublished commit plan **Gardening**. It never cha
 <img width="1399" height="584" alt="Cap 2026-09-24 01-46-30" src="https://github.com/user-attachments/assets/fcdc4913-a1ad-40ba-b206-bcc5f577b44c" />
 
 <img width="929" height="221" alt="Cap 2026-09-24 04-42-44" src="https://github.com/user-attachments/assets/dc5e1493-83cf-476d-b28d-69b2857d27ec" />
-<hr/>
 
 ## Features
 
