@@ -40,7 +40,9 @@ function validateCounts(entries: CommitEntry[]): void {
 }
 
 function sortEntries(entries: CommitEntry[]): CommitEntry[] {
-  return [...entries].sort((a, b) => a.targetDate.localeCompare(b.targetDate) || a.id.localeCompare(b.id));
+  return [...entries].sort(
+    (a, b) => a.targetDate.localeCompare(b.targetDate) || a.id.localeCompare(b.id),
+  );
 }
 
 export function createCommitPlan(input: CreatePlanInput): CommitPlan {
@@ -67,35 +69,59 @@ export function createCommitPlan(input: CreatePlanInput): CommitPlan {
   };
 }
 
-export function setPlannedCount(plan: CommitPlan, date: string, count: number, now = new Date()): CommitPlan {
-  if (!Number.isInteger(count) || count < 0) throw new Error('Count must be a non-negative integer');
+export function setPlannedCount(
+  plan: CommitPlan,
+  date: string,
+  count: number,
+  now = new Date(),
+): CommitPlan {
+  if (!Number.isInteger(count) || count < 0)
+    throw new Error('Count must be a non-negative integer');
   const timezone = plan.entries[0]?.timezone;
   if (!timezone) throw new Error('Plan has no time zone');
   if (isDateInFuture(date, timezone, now)) throw new Error('Future dates are not allowed');
   const existing = plan.entries.filter((entry) => entry.targetDate === date);
-  if (existing.some((entry) => entry.status !== 'planned')) throw new Error('Published commits cannot be edited');
+  if (existing.some((entry) => entry.status !== 'planned'))
+    throw new Error('Published commits cannot be edited');
   const other = plan.entries.filter((entry) => entry.targetDate !== date);
   const retained = existing.slice(0, count);
-  const next = Array.from({ length: Math.max(0, count - retained.length) }, (_, index) =>
-    makeEntry(`${plan.id}-${crypto.randomUUID()}`, date, timezone, retained.length + index + 1),
-  );
+  const usedIds = new Set(plan.entries.map((entry) => entry.id));
+  let suffix = 0;
+  const next = Array.from({ length: Math.max(0, count - retained.length) }, (_, index) => {
+    while (usedIds.has(`${plan.id}-extra-${suffix}`)) suffix += 1;
+    const id = `${plan.id}-extra-${suffix++}`;
+    usedIds.add(id);
+    return makeEntry(id, date, timezone, retained.length + index + 1);
+  });
   const entries = sortEntries([...other, ...retained, ...next]);
   validateCounts(entries);
   return { ...plan, entries, updatedAt: now.toISOString() };
 }
 
-export function movePlannedCommits(plan: CommitPlan, sourceDates: string[], targetDate: string, now = new Date()): CommitPlan {
+export function movePlannedCommits(
+  plan: CommitPlan,
+  sourceDates: string[],
+  targetDate: string,
+  now = new Date(),
+): CommitPlan {
   const selected = new Set(sourceDates);
   const timezone = plan.entries[0]?.timezone;
   if (!timezone) throw new Error('Plan has no time zone');
   if (isDateInFuture(targetDate, timezone, now)) throw new Error('Future dates are not allowed');
   const moving = plan.entries.filter((entry) => selected.has(entry.targetDate));
-  if (moving.some((entry) => entry.status !== 'planned')) throw new Error('Published commits cannot be edited');
-  const entries = sortEntries(plan.entries.map((entry) =>
-    selected.has(entry.targetDate)
-      ? { ...entry, targetDate, authorDateISO: toAuthorDateISO(targetDate, entry.targetTime, entry.timezone) }
-      : entry,
-  ));
+  if (moving.some((entry) => entry.status !== 'planned'))
+    throw new Error('Published commits cannot be edited');
+  const entries = sortEntries(
+    plan.entries.map((entry) =>
+      selected.has(entry.targetDate)
+        ? {
+            ...entry,
+            targetDate,
+            authorDateISO: toAuthorDateISO(targetDate, entry.targetTime, entry.timezone),
+          }
+        : entry,
+    ),
+  );
   validateCounts(entries);
   return { ...plan, entries, updatedAt: now.toISOString() };
 }

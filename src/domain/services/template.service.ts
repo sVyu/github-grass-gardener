@@ -44,7 +44,12 @@ export function generatePatternDates(
   return dates.length > 0 ? dates : [startDate];
 }
 
-export function buildActivityLog(previousContent: string, batchId: string, entry: CommitEntry): string {
-  const previous = previousContent && !previousContent.endsWith('\n') ? `${previousContent}\n` : previousContent;
-  return `${previous}${JSON.stringify({ batchId, entryId: entry.id, date: entry.targetDate, message: entry.message })}\n`;
+export function buildActivityLog(
+  previousContent: string,
+  batchId: string,
+  entry: CommitEntry,
+): string {
+  const previous =
+    previousContent && !previousContent.endsWith('\n') ? `${previousContent}\n` : previousContent;
+  return `${previous}${JSON.stringify({ batchId, entryId: entry.id, date: entry.targetDate, message: entry.message, note: entry.contentPayload })}\n`;
 }
